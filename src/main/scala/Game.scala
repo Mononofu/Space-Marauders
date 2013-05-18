@@ -194,14 +194,11 @@ class InputProviderTest extends BasicGame("InputProvider Test") {
     g.drawString("Press any button to register a controller", 10, 50);
     g.drawString(message,100,150);
 
-    val axisFuture = inputHandler ? ReadAxis
-
-    val axis = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
 
 
     var offset = 0
     for(c <- controllersToDraw) {
-      val pad = axis(c)
+      val pad = axes(c)
 
       g.drawOval(80, 80 + offset, 100, 100)
       g.drawOval(125 + pad.leftStickX * 50, 125 + pad.leftStickY * 50 + offset, 10, 10)
@@ -222,7 +219,10 @@ class InputProviderTest extends BasicGame("InputProvider Test") {
 
   }
 
+  var axes = Map[Int, Axis]()
   def update(container: GameContainer, delta: Int) {
+    val axisFuture = inputHandler ? ReadAxis
+    axes = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
   }
 }
 
@@ -253,7 +253,9 @@ class CustomLogger extends Actor {
 
 class GameActor extends Actor {
   var gameLogic: InputProviderTest = _
-  val mainThread = Config.system.actorOf(Props[MainThread], name = "mainThread")
+  val mainThread = Config.system.actorOf(Props[MainThread], name = "mainActor")
+  val rumbler = Config.system.actorOf(Props[Rumbler], name = "rumbler")
+
   def receive = {
     case "start" =>
       gameLogic = new InputProviderTest()
@@ -263,9 +265,32 @@ class GameActor extends Actor {
       if(!gameLogic.controllersToDraw.contains(controller)) {
         gameLogic.controllersToDraw = (controller :: gameLogic.controllersToDraw).sorted
       }
+
+      btn match {
+        case PadButton.A => rumbler ! Rumble(controller, (gameLogic.axes(controller).rightTrigger + 1) / 2)
+        case PadButton.B => rumbler ! Rumble(controller, 0.0f)
+        case PadButton.Y => rumbler ! "info"
+        case _ =>
+      }
   }
 }
 
+
+case class Rumble(controller: Int, strength: Float)
+
+class Rumbler extends Actor with ActorLogging {
+  import net.java.games.input.Controller.Type;
+  import net.java.games.input.ControllerEnvironment;
+
+  def receive = {
+    case Rumble(ctrl, strength) =>
+      val cEnvironment = ControllerEnvironment.getDefaultEnvironment();
+        for(rumbler <- cEnvironment.getControllers()(ctrl - 4).getRumblers()) {
+          log.info(s"rumbling @ $strength");
+          rumbler.rumble(strength);
+        }
+  }
+}
 
 
 import java.io.File
@@ -274,6 +299,8 @@ import org.lwjgl.LWJGLUtil
 object Game extends App {
   System.setProperty("org.lwjgl.librarypath", new File(new File(new File(System.getProperty("user.dir"), "lib"), "native"), LWJGLUtil.getPlatformName()).getAbsolutePath());
   System.setProperty("net.java.games.input.librarypath", System.getProperty("org.lwjgl.librarypath"));
+
+  // val rumbler = new RumbleTest()
 
   val game = Config.system.actorOf(Props[GameActor], name = "game")
   Config.system.eventStream.subscribe(game, classOf[ButtonEvent])
