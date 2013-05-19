@@ -100,15 +100,19 @@ class InputProviderTest extends BasicGame("InputProvider Test") {
       offset += 130
     }
 
-    var hightlightedCircle = -1
 
-    for(c <- controllersToDraw) {
-      val pad = axes(c)
-      if(Math.abs(pad.leftStickX) > 0.1 || Math.abs(pad.leftStickY) > 0.1) {
-        val phi = Math.atan2(pad.leftStickX, pad.leftStickY)
-        hightlightedCircle = (12 - (phi * 8 / (2*Math.PI) + 0.5).toInt) % 8
+    def getHighlighted(): Int = {
+      for(c <- controllersToDraw) {
+        val pad = axes(c)
+        if(Math.abs(pad.leftStickX) > 0.1 || Math.abs(pad.leftStickY) > 0.1) {
+          val phi = Math.atan2(pad.leftStickX, pad.leftStickY)
+          return (12 - (phi * 8 / (2*Math.PI) + 0.5).toInt) % 8
+        }
       }
+      return -1
     }
+
+    val hightlightedCircle = getHighlighted()
 
     val darkYellow = new Color(179, 142, 31)
     val darkBlue = new Color(25, 66, 127)
