@@ -21,48 +21,23 @@ object PadButton extends Enumeration {
 
 import PadButton.PadButton
 
-abstract class ButtonEvent
+abstract class ButtonEvent extends InputEvent
 case class ButtonDown(controller: Int, btn: PadButton) extends ButtonEvent
 case class ButtonUp(controller: Int, btn: PadButton) extends ButtonEvent
 
 case class Rumble(controller: Int, strength: Float)
 
-case class SubscribeAll(actor: ActorRef)
-case class SubscribeUnhandled(actor: ActorRef)
-case class Unsubscribe(actor: ActorRef)
-case class EventLink(e: ButtonEvent, next: Seq[ActorRef])
 
-class UnhandledEventActor extends Actor with ActorLogging {
-  def receive = {
-    case EventLink(e, Nil) => log.info(s"unhandled: $e")
-    case EventLink(e, next) => log.warning("I should be the last actor in the chain")
-  }
-}
+class GamepadActor extends Actor with ActorLogging {
+  Controllers.create()
+  Controllers.poll()
+  Controllers.clearEvents()
+  val controllers = (0 until Controllers.getControllerCount()).filter(
+    c => Controllers.getController(c).getAxisCount() > 10)
 
-class InputActor extends Actor with ActorLogging {
-  val unhandledActor = Config.system.actorOf(Props[UnhandledEventActor], name = "unhandledActor")
-
-  var controllers: Seq[Int] = (0 to 8)
-  var subscribers = List[ActorRef]()
-  var unhandled_subscribers = List[ActorRef](unhandledActor)
+  val inputActor = context.actorFor("/user/inputActor")
 
   def receive = {
-    case Start =>
-      Controllers.create()
-      Controllers.clearEvents()
-      controllers = (0 until Controllers.getControllerCount()).filter(c => Controllers.getController(c).getAxisCount() > 10)
-      sender ! Done
-
-    case SubscribeAll(sub) =>
-      subscribers = sub :: subscribers
-
-    case SubscribeUnhandled(sub) =>
-      unhandled_subscribers = sub :: unhandled_subscribers
-
-    case Unsubscribe(sub) =>
-      subscribers = subscribers.filter(_ != sub)
-      unhandled_subscribers = unhandled_subscribers.filter(_ != sub)
-
     case Poll =>
       Controllers.poll()
       while(Controllers.next()) {
@@ -72,16 +47,16 @@ class InputActor extends Actor with ActorLogging {
           val componentI = Controllers.getEventControlIndex()
           if(Controllers.isEventButton()) {
             if(controller.isButtonPressed(componentI)) {
-              publish(ButtonDown(controllerI, translateButton(componentI)))
+              inputActor ! ButtonDown(controllerI, translateButton(componentI))
             } else {
-              publish(ButtonUp(controllerI, translateButton(componentI)))
+              inputActor ! ButtonUp(controllerI, translateButton(componentI))
             }
           } else {
             if(componentI <= 4) {
               if(controller.getAxisValue(componentI) == 1.0) {
-                publish(ButtonDown(controllerI, translateAxis(componentI)))
+                inputActor ! ButtonDown(controllerI, translateAxis(componentI))
               } else {
-                publish(ButtonUp(controllerI, translateAxis(componentI)))
+                inputActor ! ButtonUp(controllerI, translateAxis(componentI))
               }
             } else {
               //val newValue = Controllers.getEventSource().getAxisValue(componentI)
@@ -107,14 +82,6 @@ class InputActor extends Actor with ActorLogging {
           c -> Axis(axes(5), axes(6), axes(8), axes(9), axes(7), axes(10))
       }
       sender ! controllerAxes.toMap
-  }
-
-  def publish(ev: ButtonEvent) {
-    for(sub <- subscribers) {
-      sub ! ev
-    }
-    unhandled_subscribers.head ! EventLink(ev, unhandled_subscribers.tail)
-    // Config.system.eventStream.publish(ev)
   }
 
   def translateAxis(axis: Int) = axis match {
