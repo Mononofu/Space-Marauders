@@ -5,6 +5,8 @@ import akka.actor._
 
 case object ReadAxis
 case object Poll
+case object Start
+case object Done
 
 // X = Left/Right, Y = Up/Down
 case class Axis(leftStickX: Float, leftStickY: Float,
@@ -25,17 +27,41 @@ case class ButtonUp(controller: Int, btn: PadButton) extends ButtonEvent
 
 case class Rumble(controller: Int, strength: Float)
 
+case class SubscribeAll(actor: ActorRef)
+case class SubscribeUnhandled(actor: ActorRef)
+case class Unsubscribe(actor: ActorRef)
+case class EventLink(e: ButtonEvent, next: Seq[ActorRef])
+
+class UnhandledEventActor extends Actor with ActorLogging {
+  def receive = {
+    case EventLink(e, Nil) => log.info(s"unhandled: $e")
+    case EventLink(e, next) => log.warning("I should be the last actor in the chain")
+  }
+}
+
 class InputActor extends Actor with ActorLogging {
+  val unhandledActor = Config.system.actorOf(Props[UnhandledEventActor], name = "unhandledActor")
+
   var controllers: Seq[Int] = (0 to 8)
+  var subscribers = List[ActorRef]()
+  var unhandled_subscribers = List[ActorRef](unhandledActor)
 
   def receive = {
-
-    case "start" =>
+    case Start =>
       Controllers.create()
       Controllers.clearEvents()
       controllers = (0 until Controllers.getControllerCount()).filter(c => Controllers.getController(c).getAxisCount() > 10)
-      sender ! "done"
+      sender ! Done
 
+    case SubscribeAll(sub) =>
+      subscribers = sub :: subscribers
+
+    case SubscribeUnhandled(sub) =>
+      unhandled_subscribers = sub :: unhandled_subscribers
+
+    case Unsubscribe(sub) =>
+      subscribers = subscribers.filter(_ != sub)
+      unhandled_subscribers = unhandled_subscribers.filter(_ != sub)
 
     case Poll =>
       Controllers.poll()
@@ -46,32 +72,30 @@ class InputActor extends Actor with ActorLogging {
           val componentI = Controllers.getEventControlIndex()
           if(Controllers.isEventButton()) {
             if(controller.isButtonPressed(componentI)) {
-              Config.system.eventStream.publish(ButtonDown(controllerI, translateButton(componentI)))
+              publish(ButtonDown(controllerI, translateButton(componentI)))
             } else {
-              Config.system.eventStream.publish(ButtonUp(controllerI, translateButton(componentI)))
+              publish(ButtonUp(controllerI, translateButton(componentI)))
             }
           } else {
             if(componentI <= 4) {
               if(controller.getAxisValue(componentI) == 1.0) {
-                Config.system.eventStream.publish(ButtonDown(controllerI, translateAxis(componentI)))
+                publish(ButtonDown(controllerI, translateAxis(componentI)))
               } else {
-                Config.system.eventStream.publish(ButtonUp(controllerI, translateAxis(componentI)))
+                publish(ButtonUp(controllerI, translateAxis(componentI)))
               }
             } else {
-              val newValue = Controllers.getEventSource().getAxisValue(componentI)
-              log.info(s"event for $componentI of $controllerI: $newValue")
+              //val newValue = Controllers.getEventSource().getAxisValue(componentI)
+              // new value for axis - don't create an event
             }
           }
         }
       }
-
 
     case Rumble(ctrl, strength) =>
       val controller = Controllers.getController(ctrl % 4)
       for(i <- 0 until controller.getRumblerCount()) {
         controller.setRumblerStrength(i, strength)
       }
-
 
     case ReadAxis =>
       val controllerAxes = controllers.map {
@@ -83,6 +107,14 @@ class InputActor extends Actor with ActorLogging {
           c -> Axis(axes(5), axes(6), axes(8), axes(9), axes(7), axes(10))
       }
       sender ! controllerAxes.toMap
+  }
+
+  def publish(ev: ButtonEvent) {
+    for(sub <- subscribers) {
+      sub ! ev
+    }
+    unhandled_subscribers.head ! EventLink(ev, unhandled_subscribers.tail)
+    // Config.system.eventStream.publish(ev)
   }
 
   def translateAxis(axis: Int) = axis match {
