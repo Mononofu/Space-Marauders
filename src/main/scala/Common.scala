@@ -14,7 +14,7 @@ object Config {
 
   val system = ActorSystem("MySystem")
   val WIDTH = 800
-  val HEIGHT = 300
+  val HEIGHT = 800
 }
 
 class CustomLogger extends Actor {
@@ -29,5 +29,14 @@ class CustomLogger extends Actor {
       println(s"[INFO] $message")
     case Debug(logSource, logClass, message)        ⇒
       println(s"[DEBUG] $message")
+  }
+}
+
+class InputLogger extends Actor with ActorLogging {
+  def receive = {
+    case ButtonDown(ctrl, btn) => log.info(s"controller $ctrl pressed $btn")
+    case ButtonUp(ctrl, btn) => log.info(s"controller $ctrl released $btn")
+    case KeyDown(code, c) => log.info(s"key '$c' pressed ($code)")
+    case KeyUp(code, c) => log.info(s"key '$c' released ($code)")
   }
 }

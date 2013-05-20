@@ -16,21 +16,12 @@ import org.newdawn.slick.font.effects.{ColorEffect, Effect}
 import org.newdawn.slick.geom.{Rectangle, Transform}
 
 
-class InputLogger extends Actor with ActorLogging {
-  def receive = {
-    case ButtonDown(ctrl, btn) => log.info(s"controller $ctrl pressed $btn")
-    case ButtonUp(ctrl, btn) => log.info(s"controller $ctrl released $btn")
-    case KeyDown(code, c) => log.info(s"key '$c' pressed ($code)")
-    case KeyUp(code, c) => log.info(s"key '$c' released ($code)")
-  }
-}
-
 class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider Test") {
-  var circleInput = Config.system.actorOf(Props[CircleInput].withDispatcher(CallingThreadDispatcher.Id), name = "circleInput")
   implicit val timeout = Timeout(20 milliseconds)
+  var circleInput: CircleInput = _
 
   def init(container: GameContainer) {
-    circleInput ! Start
+    circleInput = new CircleInput()
   }
 
   var controllersToDraw = List[Int]()
@@ -81,7 +72,7 @@ class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider
     }
 
     val (highlighted, leftTrigger, rightTrigger) = getCircleButtons()
-    circleInput ! RenderCircle(highlighted, leftTrigger, rightTrigger, g)
+    circleInput.render(highlighted, leftTrigger, rightTrigger, g)
   }
 
   var axes = Map[Int, Axis]()

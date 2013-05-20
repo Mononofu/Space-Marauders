@@ -10,8 +10,8 @@ import org.newdawn.slick.geom.{Rectangle, Transform}
 case class RenderCircle(hightlightedCircle: Int, leftTrigger: Boolean,
   rightTrigger: Boolean, g: Graphics)
 
-class CircleInput extends Actor {
-  val inputActor = context.actorFor("/user/inputActor")
+class CircleInput {
+  var circleInputActor = Config.system.actorOf(Props(new CircleInputActor), name = "circleInputActor")
 
   val darkYellow = new Color(179, 142, 31)
   val darkBlue = new Color(25, 66, 127)
@@ -35,88 +35,91 @@ class CircleInput extends Actor {
   val backgroundCircleRadius = charGroupCircleOffset + charGroupCircleRadius +
     charGroupCircleRadius / 2 - 5
 
-  var font: UnicodeFont = _
+  val font = new UnicodeFont("res/fonts/DroidSansMonoDotted.ttf", 20, true, false);
+  font.addAsciiGlyphs();
+  font.getEffects() match {
+    // Create a default white color effect
+    case effects: java.util.List[Effect] => effects.add(new ColorEffect());
+  }
+  font.loadGlyphs();
+
   var hightlightedCircle = -1
   var leftTrigger = false
   var rightTrigger = false
   var charsToDraw = lowerChars
 
-  def receive = {
-    case Start =>
-      inputActor ! SubscribeUnhandled(self)
-      font = new UnicodeFont("res/fonts/DroidSansMonoDotted.ttf", 20, true, false);
-      font.addAsciiGlyphs();
-      font.getEffects() match {
-        // Create a default white color effect
-        case effects: java.util.List[Effect] => effects.add(new ColorEffect());
-      }
-      font.loadGlyphs();
+  class CircleInputActor extends Actor {
+    val inputActor = context.actorFor("/user/inputActor")
+    inputActor ! SubscribeUnhandled(self)
 
-    case RenderCircle(h, l, r, g) =>
-      hightlightedCircle = h
-      leftTrigger = l
-      rightTrigger = r
-
-      if(leftTrigger) {
-        if(rightTrigger) {
-          charsToDraw = specialChars
-        } else {
-          charsToDraw = upperChars
+    def receive = {
+      case EventLink(ev @ ButtonDown(controller, btn), next) =>
+        btn match {
+          case PadButton.A | PadButton.B | PadButton.X | PadButton.Y =>
+            if(hightlightedCircle >= 0) {
+              val group = charsToDraw.grouped(4).toList(hightlightedCircle)
+              var char = (btn match {
+                case PadButton.X => group(0)
+                case PadButton.Y => group(1)
+                case PadButton.B => group(2)
+                case PadButton.A => group(3)
+              })(0)
+              inputActor ! KeyDown(Key.fromChar(char), char)
+              inputActor ! KeyUp(Key.fromChar(char), char)
+            }
+          case PadButton.RightBumper =>
+            inputActor ! KeyDown(Key.SPACE, ' ')
+            inputActor ! KeyUp(Key.SPACE, ' ')
+          case PadButton.LeftBumper =>
+            inputActor ! KeyDown(Key.BACKSPACE, 0)
+            inputActor ! KeyUp(Key.BACKSPACE, 0)
+          case _ => next.head ! EventLink(ev, next.tail)
         }
+    }
+  }
+
+
+  def render(h: Int, l: Boolean, r: Boolean, g: Graphics) {
+    hightlightedCircle = h
+    leftTrigger = l
+    rightTrigger = r
+
+    if(leftTrigger) {
+      if(rightTrigger) {
+        charsToDraw = specialChars
       } else {
-        if(rightTrigger) {
-          charsToDraw = numberChars
-        } else {
-          charsToDraw = lowerChars
-        }
+        charsToDraw = upperChars
       }
-      g.setColor(darkBackgroundCircle)
-      g.fillOval(80, 80, 2*backgroundCircleRadius, 2*backgroundCircleRadius)
-
-      val middleCircleRadius = charGroupCircleOffset
-      g.setColor(circleNormal)
-      g.fillOval(80 + backgroundCircleRadius - middleCircleRadius,
-        80 + backgroundCircleRadius - middleCircleRadius, 2*middleCircleRadius,
-        2* middleCircleRadius)
-
-      for((charGroup, i) <- charsToDraw.grouped(4).zipWithIndex) {
-        val xOffset = charGroupCircleOffset * Math.cos(2*Math.PI * ((i+6) % 8) / 8)
-        val yOffset = charGroupCircleOffset * Math.sin(2*Math.PI * ((i+6) % 8) / 8)
-        val posX = backgroundCircleRadius - charGroupCircleRadius + xOffset.toInt + 80
-        val posY = backgroundCircleRadius - charGroupCircleRadius + yOffset.toInt + 80
-
-        if(i == hightlightedCircle) {
-          drawCharsCircle(charGroup, colors, offsets, posX, posY,
-            charGroupCircleRadius, circleHighlighted, i, g)
-        } else {
-          drawCharsCircle(charGroup, transparent, offsets, posX, posY,
-            charGroupCircleRadius, circleNormal, i, g)
-        }
+    } else {
+      if(rightTrigger) {
+        charsToDraw = numberChars
+      } else {
+        charsToDraw = lowerChars
       }
-      sender ! Done
+    }
+    g.setColor(darkBackgroundCircle)
+    g.fillOval(80, 80, 2*backgroundCircleRadius, 2*backgroundCircleRadius)
 
-    case EventLink(ev @ ButtonDown(controller, btn), next) =>
-      btn match {
-        case PadButton.A | PadButton.B | PadButton.X | PadButton.Y =>
-          if(hightlightedCircle >= 0) {
-            val group = charsToDraw.grouped(4).toList(hightlightedCircle)
-            var char = (btn match {
-              case PadButton.X => group(0)
-              case PadButton.Y => group(1)
-              case PadButton.B => group(2)
-              case PadButton.A => group(3)
-            })(0)
-            inputActor ! KeyDown(Key.fromChar(char), char)
-            inputActor ! KeyUp(Key.fromChar(char), char)
-          }
-        case PadButton.RightBumper =>
-          inputActor ! KeyDown(Key.SPACE, ' ')
-          inputActor ! KeyUp(Key.SPACE, ' ')
-        case PadButton.LeftBumper =>
-          inputActor ! KeyDown(Key.BACKSPACE, 0)
-          inputActor ! KeyUp(Key.BACKSPACE, 0)
-        case _ => next.head ! EventLink(ev, next.tail)
+    val middleCircleRadius = charGroupCircleOffset
+    g.setColor(circleNormal)
+    g.fillOval(80 + backgroundCircleRadius - middleCircleRadius,
+      80 + backgroundCircleRadius - middleCircleRadius, 2*middleCircleRadius,
+      2* middleCircleRadius)
+
+    for((charGroup, i) <- charsToDraw.grouped(4).zipWithIndex) {
+      val xOffset = charGroupCircleOffset * Math.cos(2*Math.PI * ((i+6) % 8) / 8)
+      val yOffset = charGroupCircleOffset * Math.sin(2*Math.PI * ((i+6) % 8) / 8)
+      val posX = backgroundCircleRadius - charGroupCircleRadius + xOffset.toInt + 80
+      val posY = backgroundCircleRadius - charGroupCircleRadius + yOffset.toInt + 80
+
+      if(i == hightlightedCircle) {
+        drawCharsCircle(charGroup, colors, offsets, posX, posY,
+          charGroupCircleRadius, circleHighlighted, i, g)
+      } else {
+        drawCharsCircle(charGroup, transparent, offsets, posX, posY,
+          charGroupCircleRadius, circleNormal, i, g)
       }
+    }
   }
 
   def drawCharsCircle(chars: Seq[String], colors: Seq[Color], offsets: Seq[(Int, Int)],
