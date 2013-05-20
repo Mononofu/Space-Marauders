@@ -15,13 +15,21 @@ import org.newdawn.slick.command._
 import org.newdawn.slick.font.effects.{ColorEffect, Effect}
 import org.newdawn.slick.geom.{Rectangle, Transform}
 
+import GraphicConversions._
 
 class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider Test") {
   implicit val timeout = Timeout(20 milliseconds)
-  var circleInput: CircleInput = _
+  var circleInput: CircleInput[CanDrawSlick, CanWriteSlick] = _
 
   def init(container: GameContainer) {
-    circleInput = new CircleInput()
+    val font = new UnicodeFont("res/fonts/DroidSansMonoDotted.ttf", 20, true, false);
+    font.addAsciiGlyphs();
+    font.getEffects() match {
+      // Create a default white color effect
+      case effects: java.util.List[Effect] => effects.add(new ColorEffect());
+    }
+    font.loadGlyphs();
+    circleInput = new CircleInput[CanDrawSlick, CanWriteSlick](CanWriteSlick(font))
   }
 
   var controllersToDraw = List[Int]()
@@ -72,7 +80,7 @@ class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider
     }
 
     val (highlighted, leftTrigger, rightTrigger) = getCircleButtons()
-    circleInput.render(highlighted, leftTrigger, rightTrigger, g)
+    circleInput.render(highlighted, leftTrigger, rightTrigger, CanDrawSlick(g))
   }
 
   var axes = Map[Int, Axis]()

@@ -15,6 +15,14 @@ object Config {
   val system = ActorSystem("MySystem")
   val WIDTH = 800
   val HEIGHT = 800
+
+}
+
+object Helper {
+  def dump[T](value: T): T = {
+    println(value)
+    value
+  }
 }
 
 class CustomLogger extends Actor {

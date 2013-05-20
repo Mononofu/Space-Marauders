@@ -5,12 +5,52 @@ import akka.actor._
 import org.newdawn.slick._
 import org.newdawn.slick.command._
 import org.newdawn.slick.font.effects.{ColorEffect, Effect}
-import org.newdawn.slick.geom.{Rectangle, Transform}
+import org.newdawn.slick.geom.{Rectangle, Transform, Polygon}
 
-case class RenderCircle(hightlightedCircle: Int, leftTrigger: Boolean,
-  rightTrigger: Boolean, g: Graphics)
+trait CanDraw {
+  def setColor(c: Color): Unit
+  def fillOval(x1: Float, y: Float, width: Float, height: Float): Unit
+  def fillPolygon(xPoints: Seq[Float], yPoints: Seq[Float]): Unit
 
-class CircleInput {
+  def drawString(font: CanWrite, x: Float, y: Float, str: String, c: Color): Unit
+  def getHeight(font: CanWrite, str: String): Int
+  def getWidth(font: CanWrite, str: String): Int
+}
+
+trait CanWrite {
+  def drawString[T <: CanDraw](g: T, x: Float, y: Float, str: String, c: Color): Unit
+  def getHeight[T <: CanDraw](g: T, str: String): Int
+  def getWidth[T <: CanDraw](g: T, str: String): Int
+}
+
+import Helper._
+
+object GraphicConversions {
+  case class CanDrawSlick(g: Graphics) extends CanDraw {
+    def setColor(c: Color) { g.setColor(c) }
+    def fillOval(x: Float, y: Float, width: Float, height: Float) {
+      g.fillOval(x, y, width, height)
+    }
+    def fillPolygon(xPoints: Seq[Float], yPoints: Seq[Float]) {
+      g.fill(new Polygon(xPoints.zip(yPoints).map(p =>
+        List(p._1, p._2)).flatten.toArray))
+    }
+
+    def drawString(font: CanWrite, x: Float, y: Float, str: String, c: Color) =
+      font.drawString(this, x, y, str, c)
+    def getHeight(font: CanWrite, str: String) = font.getHeight(this, str)
+    def getWidth(font: CanWrite, str: String) = font.getWidth(this, str)
+  }
+
+  case class CanWriteSlick(f: Font) extends CanWrite {
+    def drawString[T <: CanDraw](g: T, x: Float, y: Float, str: String,
+      c: Color) = f.drawString(x, y, str, c)
+    def getHeight[T <: CanDraw](g: T, str: String) = f.getHeight(str)
+    def getWidth[T <: CanDraw](g: T, str: String) = f.getWidth(str)
+  }
+}
+
+class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
   var circleInputActor = Config.system.actorOf(Props(new CircleInputActor), name = "circleInputActor")
 
   val darkYellow = new Color(179, 142, 31)
@@ -20,7 +60,7 @@ class CircleInput {
   val circleHighlighted = new Color(56, 91, 112)
   val circleNormal = new Color(33, 57, 71)
   val darkBackgroundCircle = new Color(28, 49, 61)
-  val transparent = List(Color.transparent, Color.transparent, Color.transparent, Color.transparent)
+  val normal = List(circleNormal, circleNormal, circleNormal, circleNormal)
   val colors = List(darkBlue, darkYellow, darkRed, darkGreen)
   val o = 40
   val offsets = List( (-o, 0), (0, -o), (o, 0), (0, o) )
@@ -34,14 +74,6 @@ class CircleInput {
   val charGroupCircleOffset = 185
   val backgroundCircleRadius = charGroupCircleOffset + charGroupCircleRadius +
     charGroupCircleRadius / 2 - 5
-
-  val font = new UnicodeFont("res/fonts/DroidSansMonoDotted.ttf", 20, true, false);
-  font.addAsciiGlyphs();
-  font.getEffects() match {
-    // Create a default white color effect
-    case effects: java.util.List[Effect] => effects.add(new ColorEffect());
-  }
-  font.loadGlyphs();
 
   var hightlightedCircle = -1
   var leftTrigger = false
@@ -79,7 +111,7 @@ class CircleInput {
   }
 
 
-  def render(h: Int, l: Boolean, r: Boolean, g: Graphics) {
+  def render(h: Int, l: Boolean, r: Boolean, g: G) {
     hightlightedCircle = h
     leftTrigger = l
     rightTrigger = r
@@ -116,22 +148,23 @@ class CircleInput {
         drawCharsCircle(charGroup, colors, offsets, posX, posY,
           charGroupCircleRadius, circleHighlighted, i, g)
       } else {
-        drawCharsCircle(charGroup, transparent, offsets, posX, posY,
+        drawCharsCircle(charGroup, normal, offsets, posX, posY,
           charGroupCircleRadius, circleNormal, i, g)
       }
     }
   }
 
-  def drawCharsCircle(chars: Seq[String], colors: Seq[Color], offsets: Seq[(Int, Int)],
-    x: Int, y: Int, r: Int, circleColor: Color, index: Int, g: Graphics) {
+  def drawCharsCircle(chars: Seq[String], colors: Seq[Color],
+    offsets: Seq[(Int, Int)], x: Int, y: Int, r: Int, circleColor: Color,
+    index: Int, g: G) {
     g.setColor(circleColor)
     g.fillOval(x, y, 2*r, 2*r)
 
     val rect = (new Rectangle(0, 0, r, r)).transform(
       Transform.createRotateTransform((Math.PI * (index-3)/4.).toFloat)).transform(
       Transform.createTranslateTransform(x+r, y+r))
-
-    g.fill(rect)
+    val (xPoints, yPoints) = rect.getPoints().grouped(2).map(l => (l(0), l(1))).toList.unzip
+    g.fillPolygon(xPoints, yPoints)
 
     val childRadius = 20
     chars.zip(colors).zip(offsets).foreach {
@@ -141,11 +174,12 @@ class CircleInput {
     }
   }
 
-  def drawCharCircle(c: String, circleColor: Color, x: Int, y: Int, r: Int, g: Graphics) {
+  def drawCharCircle(c: String, circleColor: Color, x: Int, y: Int,
+    r: Int, g: G) {
     g.setColor(circleColor)
     g.fillOval(x, y, r*2, r*2)
 
-    font.drawString(x + r - font.getWidth(c) /2 - 1,
-      y + r - font.getHeight(c)/2 - 1, c, Color.white)
+    g.drawString(font, x + r - g.getWidth(font, c) /2 - 1,
+      y + r - g.getHeight(font, c)/2 - 1, c, Color.white)
   }
 }
