@@ -19,7 +19,7 @@ import GraphicConversions._
 
 class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider Test") {
   implicit val timeout = Timeout(20 milliseconds)
-  var circleInput: CircleInput[CanDrawSlick, CanWriteSlick] = _
+  var circleInput: CircleInput[CanDrawSlick, CanWriteSlick, ImageLikeSlick] = _
 
   def init(container: GameContainer) {
     val font = new UnicodeFont("res/fonts/DroidSansMonoDotted.ttf", 20, true, false);
@@ -29,7 +29,9 @@ class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider
       case effects: java.util.List[Effect] => effects.add(new ColorEffect());
     }
     font.loadGlyphs();
-    circleInput = new CircleInput[CanDrawSlick, CanWriteSlick](CanWriteSlick(font))
+    val img = new org.newdawn.slick.Image("res/img/left_stick.png")
+    circleInput = new CircleInput[CanDrawSlick, CanWriteSlick, ImageLikeSlick](
+      CanWriteSlick(font), ImageLikeSlick(img))
   }
 
   var controllersToDraw = List[Int]()
@@ -124,26 +126,26 @@ class GameActor extends Actor {
 import java.io.File
 import org.lwjgl.LWJGLUtil
 
-object MyGame extends App {
-  System.setProperty("org.lwjgl.librarypath", new File(new File(new File(System.getProperty("user.dir"), "lib"), "native"), LWJGLUtil.getPlatformName()).getAbsolutePath());
-  System.setProperty("net.java.games.input.librarypath", System.getProperty("org.lwjgl.librarypath"));
+// object MyGame extends App {
+//   System.setProperty("org.lwjgl.librarypath", new File(new File(new File(System.getProperty("user.dir"), "lib"), "native"), LWJGLUtil.getPlatformName()).getAbsolutePath());
+//   System.setProperty("net.java.games.input.librarypath", System.getProperty("org.lwjgl.librarypath"));
 
-  // very important - use lwjgl for gamepad input!
-  Input.disableControllers()
+//   // very important - use lwjgl for gamepad input!
+//   Input.disableControllers()
 
-  val inputActor = Config.system.actorOf(Props[InputActor], name = "inputActor")
-  val gamepadActor = Config.system.actorOf(Props[GamepadActor], name = "gamepadActor")
-  val inputLogger = Config.system.actorOf(Props[InputLogger], name = "inputLogger")
-  val game = Config.system.actorOf(Props[GameActor], name = "game")
+//   val inputActor = Config.system.actorOf(Props[InputActor], name = "inputActor")
+//   val gamepadActor = Config.system.actorOf(Props[GamepadActor], name = "gamepadActor")
+//   val inputLogger = Config.system.actorOf(Props[InputLogger], name = "inputLogger")
+//   val game = Config.system.actorOf(Props[GameActor], name = "game")
 
-  Config.system.scheduler.schedule(0 milliseconds,
-      10 milliseconds,
-      gamepadActor,
-      Poll)
-  inputActor ! SubscribeAll(inputLogger)
-  inputActor ! SubscribeUnhandled(game)
+//   Config.system.scheduler.schedule(0 milliseconds,
+//       10 milliseconds,
+//       gamepadActor,
+//       Poll)
+//   inputActor ! SubscribeAll(inputLogger)
+//   inputActor ! SubscribeUnhandled(game)
 
-  game ! Start
+//   game ! Start
 
-  Thread.sleep(10000)
-}
+//   Thread.sleep(10000)
+// }

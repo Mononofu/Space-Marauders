@@ -8,8 +8,8 @@ abstract class InputEvent
 object Key extends Enumeration {
   type Key = Value
   val A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y,
-    Z, SPACE, BACKSPACE, DELETE, ENTER, SHIFT, CONTROL, _0, _1, _2, _3, _4, _5,
-    _6, _7, _8, _9, UNKNOWN = Value
+    Z, SPACE, BACKSPACE, DELETE, RETURN, SHIFT, CONTROL, _0, _1, _2, _3, _4, _5,
+    _6, _7, _8, _9, LEFT, RIGHT, UP, DOWN, ESCAPE, UNKNOWN = Value
   def fromChar(c: Char) = c match {
     case 'a' | 'A' => A
     case 'b' | 'B' => B

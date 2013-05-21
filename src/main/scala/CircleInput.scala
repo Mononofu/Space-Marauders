@@ -5,22 +5,34 @@ import akka.actor._
 import org.newdawn.slick._
 import org.newdawn.slick.command._
 import org.newdawn.slick.font.effects.{ColorEffect, Effect}
-import org.newdawn.slick.geom.{Rectangle, Transform, Polygon}
+import org.newdawn.slick.geom.{Rectangle, Transform, Polygon, Shape}
 
 trait CanDraw {
   def setColor(c: Color): Unit
   def fillOval(x1: Float, y: Float, width: Float, height: Float): Unit
   def fillPolygon(xPoints: Seq[Float], yPoints: Seq[Float]): Unit
+  def fillShape(r: Shape) = {
+    val (xPoints, yPoints) = r.getPoints().grouped(2).map(l => (l(0), l(1))).toList.unzip
+    fillPolygon(xPoints, yPoints)
+  }
 
   def drawString(font: CanWrite, x: Float, y: Float, str: String, c: Color): Unit
   def getHeight(font: CanWrite, str: String): Int
   def getWidth(font: CanWrite, str: String): Int
+
+  def drawImage(img: ImageLike, x: Float, y: Float): Unit
 }
 
 trait CanWrite {
   def drawString[T <: CanDraw](g: T, x: Float, y: Float, str: String, c: Color): Unit
   def getHeight[T <: CanDraw](g: T, str: String): Int
   def getWidth[T <: CanDraw](g: T, str: String): Int
+}
+
+trait ImageLike {
+  def draw[T <: CanDraw](g: T, x: Float, y: Float)
+  def getWidth(): Int
+  def getHeight(): Int
 }
 
 import Helper._
@@ -40,6 +52,8 @@ object GraphicConversions {
       font.drawString(this, x, y, str, c)
     def getHeight(font: CanWrite, str: String) = font.getHeight(this, str)
     def getWidth(font: CanWrite, str: String) = font.getWidth(this, str)
+
+    def drawImage(img: ImageLike, x: Float, y: Float) = img.draw(this, x, y)
   }
 
   case class CanWriteSlick(f: Font) extends CanWrite {
@@ -48,9 +62,17 @@ object GraphicConversions {
     def getHeight[T <: CanDraw](g: T, str: String) = f.getHeight(str)
     def getWidth[T <: CanDraw](g: T, str: String) = f.getWidth(str)
   }
+
+  case class ImageLikeSlick(img: Image) extends ImageLike {
+    def draw[T <: CanDraw](g: T, x: Float, y: Float) = g match {
+      case g: CanDrawSlick => g.g.drawImage(img, x, y)
+    }
+    def getWidth() = img.getWidth()
+    def getHeight() = img.getHeight()
+  }
 }
 
-class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
+class CircleInput[G <: CanDraw, F <: CanWrite, I <: ImageLike](font: F, leftStickImage: I) {
   var circleInputActor = Config.system.actorOf(Props(new CircleInputActor), name = "circleInputActor")
 
   val darkYellow = new Color(179, 142, 31)
@@ -75,14 +97,27 @@ class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
   val backgroundCircleRadius = charGroupCircleOffset + charGroupCircleRadius +
     charGroupCircleRadius / 2 - 5
 
+  val xPos = 80
+  val yPos = 80
+
+  val descriptionOffset = 2*backgroundCircleRadius + 50
+
   var hightlightedCircle = -1
   var leftTrigger = false
   var rightTrigger = false
   var charsToDraw = lowerChars
 
+
+  def quit() = circleInputActor ! PoisonPill
+
   class CircleInputActor extends Actor {
     val inputActor = context.actorFor("/user/inputActor")
     inputActor ! SubscribeUnhandled(self)
+
+    override def postStop() = {
+      inputActor ! Unsubscribe(self)
+      println("poststop")
+    }
 
     def receive = {
       case EventLink(ev @ ButtonDown(controller, btn), next) =>
@@ -98,6 +133,15 @@ class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
               })(0)
               inputActor ! KeyDown(Key.fromChar(char), char)
               inputActor ! KeyUp(Key.fromChar(char), char)
+            } else {
+              btn match {
+                case PadButton.A =>
+                  inputActor ! KeyDown(Key.RETURN, 0)
+                  inputActor ! KeyUp(Key.RETURN, 0)
+                case PadButton.B =>
+                  inputActor ! KeyDown(Key.ESCAPE, 0)
+                  inputActor ! KeyUp(Key.ESCAPE, 0)
+              }
             }
           case PadButton.RightBumper =>
             inputActor ! KeyDown(Key.SPACE, ' ')
@@ -105,8 +149,22 @@ class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
           case PadButton.LeftBumper =>
             inputActor ! KeyDown(Key.BACKSPACE, 0)
             inputActor ! KeyUp(Key.BACKSPACE, 0)
+          case PadButton.PadLeft =>
+            inputActor ! KeyDown(Key.LEFT, 0)
+            inputActor ! KeyUp(Key.LEFT, 0)
+          case PadButton.PadRight =>
+            inputActor ! KeyDown(Key.RIGHT, 0)
+            inputActor ! KeyUp(Key.RIGHT, 0)
+          case PadButton.PadUp =>
+            inputActor ! KeyDown(Key.UP, 0)
+            inputActor ! KeyUp(Key.UP, 0)
+          case PadButton.PadDown =>
+            inputActor ! KeyDown(Key.DOWN, 0)
+            inputActor ! KeyUp(Key.DOWN, 0)
           case _ => next.head ! EventLink(ev, next.tail)
         }
+      case EventLink(ev, next) =>
+        next.head ! EventLink(ev, next.tail)
     }
   }
 
@@ -129,20 +187,20 @@ class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
         charsToDraw = lowerChars
       }
     }
-    g.setColor(darkBackgroundCircle)
-    g.fillOval(80, 80, 2*backgroundCircleRadius, 2*backgroundCircleRadius)
+    // g.setColor(darkBackgroundCircle)
+    // g.fillOval(80, 80, 2*backgroundCircleRadius, 2*backgroundCircleRadius)
 
     val middleCircleRadius = charGroupCircleOffset
     g.setColor(circleNormal)
-    g.fillOval(80 + backgroundCircleRadius - middleCircleRadius,
-      80 + backgroundCircleRadius - middleCircleRadius, 2*middleCircleRadius,
+    g.fillOval(xPos + backgroundCircleRadius - middleCircleRadius,
+      yPos + backgroundCircleRadius - middleCircleRadius, 2*middleCircleRadius,
       2* middleCircleRadius)
 
     for((charGroup, i) <- charsToDraw.grouped(4).zipWithIndex) {
       val xOffset = charGroupCircleOffset * Math.cos(2*Math.PI * ((i+6) % 8) / 8)
       val yOffset = charGroupCircleOffset * Math.sin(2*Math.PI * ((i+6) % 8) / 8)
-      val posX = backgroundCircleRadius - charGroupCircleRadius + xOffset.toInt + 80
-      val posY = backgroundCircleRadius - charGroupCircleRadius + yOffset.toInt + 80
+      val posX = backgroundCircleRadius - charGroupCircleRadius + xOffset.toInt + xPos
+      val posY = backgroundCircleRadius - charGroupCircleRadius + yOffset.toInt + yPos
 
       if(i == hightlightedCircle) {
         drawCharsCircle(charGroup, colors, offsets, posX, posY,
@@ -152,6 +210,30 @@ class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
           charGroupCircleRadius, circleNormal, i, g)
       }
     }
+
+    // draw leftStick symbol when nothing is selected
+    if(hightlightedCircle < 0) {
+      g.drawImage(leftStickImage,
+        xPos + backgroundCircleRadius - leftStickImage.getWidth()/2,
+        yPos + backgroundCircleRadius - leftStickImage.getHeight()/2)
+    }
+
+    val rect = new Rectangle(xPos + backgroundCircleRadius*0.3f, yPos + descriptionOffset,
+      backgroundCircleRadius*1.4f, 50)
+    g.setColor(darkBackgroundCircle)
+    g.fillShape(rect)
+
+    drawCharCircle("A", darkGreen,
+      xPos + backgroundCircleRadius - g.getWidth(font, "RETURN") - 70,
+      yPos + descriptionOffset + 5, 20, g)
+    g.drawString(font, xPos + backgroundCircleRadius - g.getWidth(font, "RETURN") - 20,
+      yPos + descriptionOffset + 25 - g.getHeight(font, "RETURN")/2, "RETURN", Color.white)
+
+    drawCharCircle("B", darkRed,
+      xPos + backgroundCircleRadius + 20,
+      yPos + descriptionOffset + 5, 20, g)
+    g.drawString(font, xPos + backgroundCircleRadius + 70,
+      yPos + descriptionOffset + 25 - g.getHeight(font, "CLOSE")/2, "CLOSE", Color.white)
   }
 
   def drawCharsCircle(chars: Seq[String], colors: Seq[Color],
@@ -163,8 +245,7 @@ class CircleInput[G <: CanDraw, F <: CanWrite](font: F) {
     val rect = (new Rectangle(0, 0, r, r)).transform(
       Transform.createRotateTransform((Math.PI * (index-3)/4.).toFloat)).transform(
       Transform.createTranslateTransform(x+r, y+r))
-    val (xPoints, yPoints) = rect.getPoints().grouped(2).map(l => (l(0), l(1))).toList.unzip
-    g.fillPolygon(xPoints, yPoints)
+    g.fillShape(rect)
 
     val childRadius = 20
     chars.zip(colors).zip(offsets).foreach {

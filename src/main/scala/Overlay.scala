@@ -31,6 +31,8 @@ case class CanDrawAwt(g: Graphics) extends CanDraw {
     font.drawString(this, x, y, str, c)
   def getHeight(font: CanWrite, str: String) = font.getHeight(this, str)
   def getWidth(font: CanWrite, str: String) = font.getWidth(this, str)
+
+  def drawImage(img: ImageLike, x: Float, y: Float) = img.draw(this, x, y)
 }
 
 case class CanWriteAwt(f: Font) extends CanWrite {
@@ -62,14 +64,25 @@ case class CanWriteAwt(f: Font) extends CanWrite {
     }
 }
 
+case class ImageLikeAwt(img: Image) extends ImageLike {
+  def draw[T <: CanDraw](g: T, x: Float, y: Float) = g match {
+    case g: CanDrawAwt => // g.g.drawImage(img, x.toInt, y.toInt, new Color(0, 0, 0, 255), null)
+  }
+  def getWidth() = img.getWidth(null)
+  def getHeight() = img.getHeight(null)
+}
+
 
 class AboutComponent(gamepadActor: ActorRef) extends JPanel {
   val myFont = Font.createFont(Font.TRUETYPE_FONT,
     new File("res/fonts/DroidSansMonoDotted.ttf"))
-  val circleInput = new CircleInput[CanDrawAwt, CanWriteAwt](CanWriteAwt(
-    myFont.deriveFont(Font.PLAIN, 20f)))
+  val myImg = ImageIO.read(new File("res/img/left_stick.png"));
+  val circleInput = new CircleInput[CanDrawAwt, CanWriteAwt, ImageLikeAwt](CanWriteAwt(
+    myFont.deriveFont(Font.PLAIN, 20f)), ImageLikeAwt(myImg))
 
   implicit val timeout = Timeout(20 milliseconds)
+
+  def quit() = circleInput.quit()
 
   override def paintComponent(graphics: Graphics) {
     graphics match {
@@ -106,38 +119,83 @@ class AboutComponent(gamepadActor: ActorRef) extends JPanel {
 
 case object Repaint
 
-class ExitActor extends Actor {
+class ExitActor extends Actor with ActorLogging {
   val gamepadActor = context.actorFor("/user/gamepadActor")
-  var window: Option[AboutComponent] = None
+  var component: Option[AboutComponent] = None
+  var window: Option[JFrame] = None
 
-  SwingUtilities.invokeLater(new Runnable() {
-    override def run() {
-      val frame = new JFrame("Circle Overlay");
-      //turn of window decorations
-      frame.setUndecorated(true);
-      //turn off the background
-      frame.setBackground(new Color(0, 0, 0, 0));
-      window = Some(new AboutComponent(gamepadActor))
-      frame.setContentPane(window.get);
-      frame.pack();
-      //size the window
-      frame.setSize(800, 800);
-      frame.setVisible(true);
-      //center on screen
-      frame.setLocationRelativeTo(null);
-    }
-  } );
+  def createWindow() = {
+    SwingUtilities.invokeLater(new Runnable() {
+      override def run() {
+        val frame = new JFrame("Circle Overlay");
+        window = Some(frame)
+        //turn of window decorations
+        frame.setFocusableWindowState(false);
+        frame.setUndecorated(true);
+        //turn off the background
+        frame.setBackground(new Color(0, 0, 0, 0));
+        component = Some(new AboutComponent(gamepadActor))
+        frame.setContentPane(component.get);
+        frame.pack();
+        //size the window
+        frame.setSize(800, 800);
+        frame.setVisible(true);
+        //center on screen
+        frame.setLocationRelativeTo(null);
+      }
+    } );
+  }
 
   def receive = {
-    case EventLink(ev @ ButtonDown(controller, btn), next) =>
-      btn match {
-        case PadButton.Back => sys.exit(0)
+    case EventLink(ev, next) =>
+      log.info("try")
+      ev match {
+        case KeyDown(Key.ESCAPE, c) =>
+          window.map {
+            case w =>
+              log.info("closing")
+              w.setVisible(false);
+              w.dispose()
+              component.map(_.quit())
+              window = None
+          }
+        case ButtonDown(ctrl, PadButton.Back) => sys.exit(0)
+        case ButtonDown(ctrl, PadButton.A) =>
+          if(window.isEmpty)
+            createWindow()
         case _ => next.head ! EventLink(ev, next.tail)
       }
     case Repaint =>
-      window.map(_.repaint(0, 0, 0, 800, 800))
+      component.map(_.repaint(0, 0, 0, 800, 800))
   }
 }
+
+
+class XInputActor extends Actor {
+  import scala.sys.process._
+
+  def receive = {
+    case KeyUp(code, c) => code match {
+      case Key.SPACE => "xdotool key space" !
+      case Key.BACKSPACE => "xdotool key BackSpace" !
+      case Key.LEFT => "xdotool key Left" !
+      case Key.RIGHT => "xdotool key Right" !
+      case Key.UP => "xdotool key Up" !
+      case Key.DOWN => "xdotool key Down" !
+      case Key.RETURN => "xdotool key Return" !
+      case _ => c match {
+        case '.' => "xdotool key period" !
+        case ',' => "xdotool key comma" !
+        case ':' => "xdotool key colon" !
+        case '/' => "xdotool key slash" !
+        case '@' => "xdotool key at" !
+        case '-' => "xdotool key minus" !
+        case _ => s"xdotool key $c" !
+      }
+    }
+  }
+}
+
 
 
 import java.io.File
@@ -156,6 +214,7 @@ object Overlay extends App {
   val gamepadActor = Config.system.actorOf(Props[GamepadActor], name = "gamepadActor")
   val inputLogger = Config.system.actorOf(Props[InputLogger], name = "inputLogger")
   val exitActor = Config.system.actorOf(Props[ExitActor], name = "exitActor")
+  val xInputActor = Config.system.actorOf(Props[XInputActor], name = "xInputActor")
 
   Config.system.scheduler.schedule(0 milliseconds,
       10 milliseconds,
@@ -167,6 +226,7 @@ object Overlay extends App {
       Repaint)
   inputActor ! SubscribeAll(inputLogger)
   inputActor ! SubscribeUnhandled(exitActor)
+  inputActor ! SubscribeAll(xInputActor)
 
 
 }
