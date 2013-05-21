@@ -1,6 +1,6 @@
 package org.furidamu.SpaceMarauders
 
-import java.awt._; //Graphics2D, LinearGradientPaint, Point, Window, Window.Type;
+import java.awt.{Graphics2D, LinearGradientPaint, Point, Window, Graphics, Color, Font, Image}
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.JFrame;
@@ -120,9 +120,14 @@ class AboutComponent(gamepadActor: ActorRef) extends JPanel {
 case object Repaint
 
 class ExitActor extends Actor with ActorLogging {
+  implicit val timeout = Timeout(20 milliseconds)
+
   val gamepadActor = context.actorFor("/user/gamepadActor")
+  val xInputActor = context.actorFor("/user/xInputActor")
   var component: Option[AboutComponent] = None
   var window: Option[JFrame] = None
+
+  var earliestScroll = 0l
 
   def createWindow() = {
     SwingUtilities.invokeLater(new Runnable() {
@@ -150,7 +155,7 @@ class ExitActor extends Actor with ActorLogging {
     case EventLink(ev, next) =>
       log.info("try")
       ev match {
-        case KeyDown(Key.ESCAPE, c) =>
+        case KeyDown(Key.ESCAPE, _) | KeyDown(Key.RETURN, _) =>
           window.map {
             case w =>
               log.info("closing")
@@ -166,23 +171,54 @@ class ExitActor extends Actor with ActorLogging {
         case _ => next.head ! EventLink(ev, next.tail)
       }
     case Repaint =>
+
+      if(component.isEmpty) {
+        import scala.sys.process._
+        val axisFuture = gamepadActor ? ReadAxis
+        val axes = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
+
+        def parseAxes() = {
+          for((i, pad) <- axes) {
+            if(pad.leftStickY > 0.2) {
+              println("scrolling down")
+              xInputActor ! ExecuteLines(List("mouseclick 5", "mouseclick 5"))
+              earliestScroll = System.currentTimeMillis + (20 / Math.pow(pad.leftStickY, 3)).toLong
+            } else if(pad.leftStickY < -0.2) {
+              println("scrolling up")
+              xInputActor ! ExecuteLines(List("mouseclick 4", "mouseclick 4"))
+              earliestScroll = System.currentTimeMillis + (20 / Math.pow(pad.leftStickY.abs, 3)).toLong
+            }
+          }
+        }
+
+        if(System.currentTimeMillis > earliestScroll) {
+          parseAxes()
+        }
+      }
+
+
       component.map(_.repaint(0, 0, 0, 800, 800))
   }
 }
 
+case class ExecuteLines(l: Seq[String])
 
 class XInputActor extends Actor {
   import scala.sys.process._
 
+  val pb = new java.lang.ProcessBuilder("xte")
+  val p = pb.start()
+  val pw = new java.io.PrintWriter(new java.io.OutputStreamWriter(p.getOutputStream()), true)
+
   def receive = {
     case KeyUp(code, c) => code match {
-      case Key.SPACE => "xdotool key space" !
-      case Key.BACKSPACE => "xdotool key BackSpace" !
-      case Key.LEFT => "xdotool key Left" !
-      case Key.RIGHT => "xdotool key Right" !
-      case Key.UP => "xdotool key Up" !
-      case Key.DOWN => "xdotool key Down" !
-      case Key.RETURN => "xdotool key Return" !
+      case Key.SPACE => pw.println("key space")
+      case Key.BACKSPACE => pw.println("key BackSpace")
+      case Key.LEFT => pw.println("key Left")
+      case Key.RIGHT => pw.println("key Right")
+      case Key.UP => pw.println("key Up")
+      case Key.DOWN => pw.println("key Down")
+      case Key.RETURN => pw.println("key Return")
       case _ => c match {
         case '.' => "xdotool key period" !
         case ',' => "xdotool key comma" !
@@ -193,6 +229,8 @@ class XInputActor extends Actor {
         case _ => s"xdotool key $c" !
       }
     }
+    case ExecuteLines(l) =>
+      l.foreach(pw.println)
   }
 }
 
@@ -221,7 +259,7 @@ object Overlay extends App {
       gamepadActor,
       Poll)
   Config.system.scheduler.schedule(0 milliseconds,
-      30 milliseconds,
+      20 milliseconds,
       exitActor,
       Repaint)
   inputActor ! SubscribeAll(inputLogger)
