@@ -12,11 +12,12 @@ case object Done
 case class Axis(leftStickX: Float, leftStickY: Float,
   rightStickX: Float, rightStickY: Float, leftTrigger: Float, rightTrigger: Float)
 
+case class AxisMoved(controller: Int, axis: Int, newValue: Float) extends InputEvent
 
 object PadButton extends Enumeration {
   type PadButton = Value
   val A, B, X, Y, Back, Start, LeftBumper, RightBumper, PadLeft, PadRight, PadUp,
-    PadDown, Guide, LeftStick, RightStick, Unknown = Value
+    PadDown, Guide, LeftStick, RightStick, LeftTrigger, RightTrigger, Unknown = Value
 }
 
 import PadButton.PadButton
@@ -36,6 +37,11 @@ class GamepadActor extends Actor with ActorLogging {
     c => Controllers.getController(c).getAxisCount() > 10)
 
   val inputActor = context.actorFor("/user/inputActor")
+  var controllerAxes = (0 until Controllers.getControllerCount()).map(i =>
+    i -> Axis(0, 0, 0, 0, -1, -1)).toMap
+
+  var leftTriggerDown = false
+  var rightTriggerDown = false
 
   def receive = {
     case Poll =>
@@ -52,15 +58,49 @@ class GamepadActor extends Actor with ActorLogging {
               inputActor ! ButtonUp(controllerI, translateButton(componentI))
             }
           } else {
+            val newValue = controller.getAxisValue(componentI)
             if(componentI <= 4) {
-              if(controller.getAxisValue(componentI) == 1.0) {
+              if(newValue == 1.0) {
                 inputActor ! ButtonDown(controllerI, translateAxis(componentI))
               } else {
                 inputActor ! ButtonUp(controllerI, translateAxis(componentI))
               }
             } else {
-              //val newValue = Controllers.getEventSource().getAxisValue(componentI)
-              // new value for axis - don't create an event
+              val old = controllerAxes(controllerI)
+              val (cutoffLow, cutoffHigh) = (-0.8, -0.7)
+              val newAxis = componentI match {
+                case 5 => Axis(newValue, old.leftStickY, old.rightStickX,
+                  old.rightStickY, old.leftTrigger, old.rightTrigger)
+                case 6 => Axis(old.leftStickX, newValue, old.rightStickX,
+                  old.rightStickY, old.leftTrigger, old.rightTrigger)
+                case 8 => Axis(old.leftStickX, old.leftStickY, newValue,
+                  old.rightStickY, old.leftTrigger, old.rightTrigger)
+                case 9 => Axis(old.leftStickX, old.leftStickY, old.rightStickX,
+                  newValue, old.leftTrigger, old.rightTrigger)
+                case 7 =>
+                  if(!leftTriggerDown && newValue > cutoffHigh) {
+                    inputActor ! ButtonDown(controllerI, PadButton.LeftTrigger)
+                    leftTriggerDown = true
+                  } else if(leftTriggerDown && newValue < cutoffLow) {
+                    inputActor ! ButtonUp(controllerI, PadButton.LeftTrigger)
+                    leftTriggerDown = false
+                  }
+                  Axis(old.leftStickX, old.leftStickY, old.rightStickX,
+                       old.rightStickY, newValue, old.rightTrigger)
+                case 10 =>
+                  if(!rightTriggerDown && newValue > cutoffHigh) {
+                    inputActor ! ButtonDown(controllerI, PadButton.RightTrigger)
+                    rightTriggerDown = true
+                  } else if(rightTriggerDown && newValue < cutoffLow) {
+                    inputActor ! ButtonUp(controllerI, PadButton.RightTrigger)
+                    rightTriggerDown = false
+                  }
+                  Axis(old.leftStickX, old.leftStickY, old.rightStickX,
+                       old.rightStickY, old.leftTrigger, newValue)
+              }
+              controllerAxes = controllerAxes.updated(controllerI, newAxis)
+
+              inputActor ! AxisMoved(controllerI, componentI, newValue)
             }
           }
         }
@@ -73,15 +113,7 @@ class GamepadActor extends Actor with ActorLogging {
       }
 
     case ReadAxis =>
-      val controllerAxes = controllers.map {
-        c =>
-          val controller = Controllers.getController(c)
-          val axes = (0 until controller.getAxisCount()).map {
-            a => controller.getAxisValue(a)
-          }
-          c -> Axis(axes(5), axes(6), axes(8), axes(9), axes(7), axes(10))
-      }
-      sender ! controllerAxes.toMap
+      sender ! controllerAxes
   }
 
   def translateAxis(axis: Int) = axis match {

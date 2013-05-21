@@ -91,7 +91,7 @@ class CircleInput[G <: CanDraw, F <: CanWrite, I <: ImageLike](font: F, leftStic
   val upperChars = lowerChars.map(_.toUpperCase)
   val numberChars = (0 to 9).map(_.toString) ++ List("?", "!", "\"", "$", "€", "%",
     "&", "*", "(", ")", "+", ";", "_", "=", "[", "]", "{", "}", "<", ">", "'", "~")
-  val specialChars = (0 to 32).map(n => " ")
+  val specialChars = (0 to 32).map(n => "a")
   val charGroupCircleRadius = 70
   val charGroupCircleOffset = 185
   val backgroundCircleRadius = charGroupCircleOffset + charGroupCircleRadius +
@@ -161,18 +161,24 @@ class CircleInput[G <: CanDraw, F <: CanWrite, I <: ImageLike](font: F, leftStic
           case PadButton.PadDown =>
             inputActor ! KeyDown(Key.DOWN, 0)
             inputActor ! KeyUp(Key.DOWN, 0)
+          case PadButton.LeftTrigger =>
+            leftTrigger = true
+          case PadButton.RightTrigger =>
+            rightTrigger = true
           case _ => next.head ! EventLink(ev, next.tail)
         }
+      case EventLink(ButtonUp(ctrl, PadButton.LeftTrigger), next) =>
+        leftTrigger = false
+      case EventLink(ButtonUp(ctrl, PadButton.RightTrigger), next) =>
+        rightTrigger = false
       case EventLink(ev, next) =>
         next.head ! EventLink(ev, next.tail)
     }
   }
 
 
-  def render(h: Int, l: Boolean, r: Boolean, g: G) {
+  def render(h: Int, g: G) {
     hightlightedCircle = h
-    leftTrigger = l
-    rightTrigger = r
 
     if(leftTrigger) {
       if(rightTrigger) {

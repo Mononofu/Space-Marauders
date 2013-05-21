@@ -17,6 +17,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import Helper._
+import Config.system.dispatcher
 
 case class CanDrawAwt(g: Graphics) extends CanDraw {
   def setColor(c: org.newdawn.slick.Color) { g.setColor(new Color(c.r, c.g, c.b)) }
@@ -90,27 +91,18 @@ class AboutComponent(gamepadActor: ActorRef) extends JPanel {
         val axisFuture = gamepadActor ? ReadAxis
         val axes = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
 
-        def getCircleButtons(): (Int, Boolean, Boolean) = {
-          var leftTrigger = false
-          var rightTrigger = false
+        def getHighlighted(): Int = {
           for((i, pad) <- axes) {
-            if(!leftTrigger)
-              leftTrigger = pad.leftTrigger > -0.6
-            if(!rightTrigger)
-              rightTrigger = pad.rightTrigger > -0.6
-
             if(Math.abs(pad.leftStickX) > 0.2 || Math.abs(pad.leftStickY) > 0.2) {
               val phi = Math.atan2(pad.leftStickX, pad.leftStickY)
-              val highlighted = (12 - (phi * 8 / (2*Math.PI) + 0.5).toInt) % 8
-              return (highlighted, leftTrigger, rightTrigger)
+              return (12 - (phi * 8 / (2*Math.PI) + 0.5).toInt) % 8
             }
           }
-          return (-1, leftTrigger, rightTrigger)
+          return -1
         }
 
         import GraphicConversions._
-        val (highlighted, leftTrigger, rightTrigger) = getCircleButtons()
-        circleInput.render(highlighted, leftTrigger, rightTrigger, CanDrawAwt(g))
+        circleInput.render(getHighlighted(), CanDrawAwt(g))
     }
   }
 
@@ -126,8 +118,6 @@ class ExitActor extends Actor with ActorLogging {
   val xInputActor = context.actorFor("/user/xInputActor")
   var component: Option[AboutComponent] = None
   var window: Option[JFrame] = None
-
-  var earliestScroll = 0l
 
   def createWindow() = {
     SwingUtilities.invokeLater(new Runnable() {
@@ -153,51 +143,70 @@ class ExitActor extends Actor with ActorLogging {
 
   def receive = {
     case EventLink(ev, next) =>
-      log.info("try")
       ev match {
         case KeyDown(Key.ESCAPE, _) | KeyDown(Key.RETURN, _) =>
           window.map {
             case w =>
-              log.info("closing")
               w.setVisible(false);
               w.dispose()
               component.map(_.quit())
+              component = None
               window = None
           }
         case ButtonDown(ctrl, PadButton.Back) => sys.exit(0)
         case ButtonDown(ctrl, PadButton.A) =>
-          if(window.isEmpty)
+          if(window.isEmpty) {
             createWindow()
+          }
+        case ButtonDown(ctrl, PadButton.LeftTrigger) =>
+          xInputActor ! ExecuteLines(List("keydown Super_L", "keydown Left",
+            "keyup Super_L", "keyup Left"))
+        case ButtonDown(ctrl, PadButton.RightTrigger) =>
+          xInputActor ! ExecuteLines(List("keydown Super_L", "keydown Right",
+            "keyup Super_L", "keyup Right"))
+        case ButtonDown(ctrl, PadButton.LeftBumper) =>
+          xInputActor ! ExecuteLines(List("keydown Control_L", "keydown Tab",
+            "keyup Control_L", "keyup Tab"))
+        case ButtonDown(ctrl, PadButton.RightBumper) =>
+          xInputActor ! ExecuteLines(List("keydown Control_L", "keydown Shift_L",
+            "keydown Tab", "keyup Shift_L", "keyup Control_L", "keyup Tab"))
+        case AxisMoved(ctrl, axis, newValue) =>
+          if(component.isEmpty) {
+            rescheduleScrolling()
+          }
+          component.map(_.repaint(0, 0, 0, 800, 800))
         case _ => next.head ! EventLink(ev, next.tail)
       }
-    case Repaint =>
+  }
 
-      if(component.isEmpty) {
-        import scala.sys.process._
-        val axisFuture = gamepadActor ? ReadAxis
-        val axes = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
+  var scrollTask: Option[Cancellable] = None
+  def rescheduleScrolling() = {
+    val axisFuture = gamepadActor ? ReadAxis
+    val axes = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
 
-        def parseAxes() = {
-          for((i, pad) <- axes) {
-            if(pad.leftStickY > 0.2) {
-              println("scrolling down")
-              xInputActor ! ExecuteLines(List("mouseclick 5", "mouseclick 5"))
-              earliestScroll = System.currentTimeMillis + (20 / Math.pow(pad.leftStickY, 3)).toLong
-            } else if(pad.leftStickY < -0.2) {
-              println("scrolling up")
-              xInputActor ! ExecuteLines(List("mouseclick 4", "mouseclick 4"))
-              earliestScroll = System.currentTimeMillis + (20 / Math.pow(pad.leftStickY.abs, 3)).toLong
-            }
-          }
-        }
-
-        if(System.currentTimeMillis > earliestScroll) {
-          parseAxes()
+    def getScrollInterval(): (Int, ExecuteLines) = {
+      for((i, pad) <- axes) {
+        if(pad.leftStickY > 0.2) {
+          return  ((30 / Math.pow(pad.leftStickY, 3)).toInt, ExecuteLines(List("mouseclick 5")))
+        } else if(pad.leftStickY < -0.2) {
+          return  ((30 / Math.pow(pad.leftStickY.abs, 3)).toInt, ExecuteLines(List("mouseclick 4")))
         }
       }
+      return (-1, null)
+    }
 
+    scrollTask.map(_.cancel())
+    scrollTask = None
 
-      component.map(_.repaint(0, 0, 0, 800, 800))
+    val (interval, action) = getScrollInterval()
+
+    if(interval > 0) {
+      println(s"$interval ms: $action")
+      scrollTask = Some(Config.system.scheduler.schedule(0 milliseconds,
+          interval milliseconds,
+          xInputActor,
+          action))
+    }
   }
 }
 
@@ -239,7 +248,6 @@ class XInputActor extends Actor {
 import java.io.File
 import org.lwjgl.LWJGLUtil
 import org.newdawn.slick.Input
-import Config.system.dispatcher
 
 object Overlay extends App {
   System.setProperty("org.lwjgl.librarypath", new File(new File(new File(System.getProperty("user.dir"), "lib"), "native"), LWJGLUtil.getPlatformName()).getAbsolutePath());
@@ -258,10 +266,6 @@ object Overlay extends App {
       10 milliseconds,
       gamepadActor,
       Poll)
-  Config.system.scheduler.schedule(0 milliseconds,
-      20 milliseconds,
-      exitActor,
-      Repaint)
   inputActor ! SubscribeAll(inputLogger)
   inputActor ! SubscribeUnhandled(exitActor)
   inputActor ! SubscribeAll(xInputActor)

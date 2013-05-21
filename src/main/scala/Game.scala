@@ -62,27 +62,19 @@ class InputProviderTest(gamepadActor: ActorRef) extends BasicGame("InputProvider
     }
 
 
-    def getCircleButtons(): (Int, Boolean, Boolean) = {
-      var leftTrigger = false
-      var rightTrigger = false
+    def getHighlighted(): Int = {
       for(c <- controllersToDraw) {
         val pad = axes(c)
-        if(!leftTrigger)
-          leftTrigger = pad.leftTrigger > -0.6
-        if(!rightTrigger)
-          rightTrigger = pad.rightTrigger > -0.6
 
         if(Math.abs(pad.leftStickX) > 0.2 || Math.abs(pad.leftStickY) > 0.2) {
           val phi = Math.atan2(pad.leftStickX, pad.leftStickY)
-          val highlighted = (12 - (phi * 8 / (2*Math.PI) + 0.5).toInt) % 8
-          return (highlighted, leftTrigger, rightTrigger)
+          return (12 - (phi * 8 / (2*Math.PI) + 0.5).toInt) % 8
         }
       }
-      return (-1, leftTrigger, rightTrigger)
+      return -1
     }
 
-    val (highlighted, leftTrigger, rightTrigger) = getCircleButtons()
-    circleInput.render(highlighted, leftTrigger, rightTrigger, CanDrawSlick(g))
+    circleInput.render(getHighlighted(), CanDrawSlick(g))
   }
 
   var axes = Map[Int, Axis]()

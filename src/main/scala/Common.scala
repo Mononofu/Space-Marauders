@@ -7,12 +7,15 @@ object Config {
   val customConf = ConfigFactory.parseString("""
     akka {
       # Event handlers to register at boot time (Logging$DefaultLogger logs to STDOUT)
-      event-handlers = ["org.furidamu.SpaceMarauders.CustomLogger"]
+      # event-handlers = ["org.furidamu.SpaceMarauders.CustomLogger"]
       # Options: OFF, ERROR, WARNING, INFO, DEBUG
       loglevel = "DEBUG"
+      scheduler {
+        tick-duration = 10ms
+      }
     }  """)
 
-  val system = ActorSystem("MySystem")
+  val system = ActorSystem("MySystem", customConf)
   val WIDTH = 800
   val HEIGHT = 800
 
