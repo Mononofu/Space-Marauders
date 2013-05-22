@@ -110,6 +110,7 @@ class AboutComponent(gamepadActor: ActorRef) extends JPanel {
 }
 
 case object Repaint
+case object UpdateMouseMove
 
 class ExitActor extends Actor with ActorLogging {
   implicit val timeout = Timeout(20 milliseconds)
@@ -164,12 +165,26 @@ class ExitActor extends Actor with ActorLogging {
         case ButtonDown(ctrl, PadButton.RightTrigger) =>
           xInputActor ! ExecuteLines(List("keydown Super_L", "keydown Right",
             "keyup Super_L", "keyup Right"))
-        case ButtonDown(ctrl, PadButton.LeftBumper) =>
+        case ButtonDown(ctrl, PadButton.RightBumper) =>
           xInputActor ! ExecuteLines(List("keydown Control_L", "keydown Tab",
             "keyup Control_L", "keyup Tab"))
-        case ButtonDown(ctrl, PadButton.RightBumper) =>
+        case ButtonDown(ctrl, PadButton.LeftBumper) =>
           xInputActor ! ExecuteLines(List("keydown Control_L", "keydown Shift_L",
             "keydown Tab", "keyup Shift_L", "keyup Control_L", "keyup Tab"))
+        case ButtonDown(ctrl, PadButton.LeftStick) =>
+          xInputActor ! ExecuteLines(List("mouseclick 2"))
+        case ButtonDown(ctrl, PadButton.RightStick) =>
+          xInputActor ! ExecuteLines(List("mouseclick 1"))
+        case ButtonDown(ctrl, PadButton.PadRight) =>
+          xInputActor ! ExecuteLines(List("keydown Control_L", "keydown plus",
+            "keyup plus", "keyup Control_L"))
+        case ButtonDown(ctrl, PadButton.PadLeft) =>
+          xInputActor ! ExecuteLines(List("keydown Control_L", "keydown minus",
+            "keyup minus", "keyup Control_L"))
+        case ButtonDown(ctrl, PadButton.PadUp) =>
+          xInputActor ! ExecuteLines(List("key Up"))
+        case ButtonDown(ctrl, PadButton.PadDown) =>
+          xInputActor ! ExecuteLines(List("key Down"))
         case AxisMoved(ctrl, axis, newValue) =>
           if(component.isEmpty) {
             rescheduleScrolling()
@@ -177,9 +192,14 @@ class ExitActor extends Actor with ActorLogging {
           component.map(_.repaint(0, 0, 0, 800, 800))
         case _ => next.head ! EventLink(ev, next.tail)
       }
+    case UpdateMouseMove =>
+      xInputActor ! moveMessage
   }
 
   var scrollTask: Option[Cancellable] = None
+  var moveTask: Option[Cancellable] = None
+  var moveMessage = ExecuteLines(List())
+
   def rescheduleScrolling() = {
     val axisFuture = gamepadActor ? ReadAxis
     val axes = Await.result(axisFuture, timeout.duration).asInstanceOf[Map[Int, Axis]]
@@ -195,6 +215,15 @@ class ExitActor extends Actor with ActorLogging {
       return (-1, null)
     }
 
+    def getMouseMoveDistance(): Option[(Int, Int)] = {
+      for((i, pad) <- axes) {
+        if(pad.rightStickX.abs > 0.2 || pad.rightStickY > 0.2) {
+          return Some((20 * Math.pow(pad.rightStickX, 3)).toInt, (20 * Math.pow(pad.rightStickY, 3)).toInt)
+        }
+      }
+      return None
+    }
+
     scrollTask.map(_.cancel())
     scrollTask = None
 
@@ -206,6 +235,22 @@ class ExitActor extends Actor with ActorLogging {
           interval milliseconds,
           xInputActor,
           action))
+    }
+
+
+    val moveDistance = getMouseMoveDistance()
+    if(moveDistance.isEmpty) {
+      moveTask.map(_.cancel())
+      moveTask = None
+    } else {
+      val (dx, dy) = moveDistance.get
+      moveMessage = ExecuteLines(List(s"mousermove $dx $dy"))
+      if(moveTask.isEmpty) {
+        moveTask = Some(Config.system.scheduler.schedule(0 milliseconds,
+          10 milliseconds,
+          self,
+          UpdateMouseMove))
+      }
     }
   }
 }
