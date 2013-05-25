@@ -217,7 +217,7 @@ class ExitActor extends Actor with ActorLogging {
 
     def getMouseMoveDistance(): Option[(Int, Int)] = {
       for((i, pad) <- axes) {
-        if(pad.rightStickX.abs > 0.2 || pad.rightStickY > 0.2) {
+        if(pad.rightStickX.abs > 0.1 || pad.rightStickY > 0.1) {
           return Some((20 * Math.pow(pad.rightStickX, 3)).toInt, (20 * Math.pow(pad.rightStickY, 3)).toInt)
         }
       }
